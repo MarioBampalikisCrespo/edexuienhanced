@@ -1,4 +1,4 @@
-// terminal.class.js (parcheado para usar IPC de Electron en lugar de WebSocket)
+// terminal.class.js (patched to use IPC instead of WebSockets)
 class Terminal {
     constructor(opts) {
         if (opts.role === "client") {
@@ -138,8 +138,6 @@ class Terminal {
             // Prevent soft-keyboard on touch devices #733
             document.querySelectorAll('.xterm-helper-textarea').forEach(textarea => textarea.setAttribute('readonly', 'readonly'))
             this.term.focus();
-
-            // Notificar arranque al proceso principal, conservar el canal por puerto
             this.Ipc.send("terminal_channel-"+this.port, "Renderer startup");
             this.Ipc.on("terminal_channel-"+this.port, (e, ...args) => {
                 switch(args[0]) {
@@ -164,8 +162,6 @@ class Terminal {
                 this.oncwdchange(this.cwd || null);
             };
 
-            // === Sustitución de WebSocket por IPC ===
-            // Recepción de datos del PTY desde main
             this.lastSoundFX = Date.now();
             this.lastRefit = 0;
             this.Ipc.on("terminal_data-"+this.port, (e, data) => {
@@ -180,7 +176,6 @@ class Terminal {
                     this.fit();
                 }
 
-                // See #397 (mantener lógica de globe/IPs)
                 if (!window.settings.experimentalGlobeFeatures) {
                     this.term.write(data);
                     return;
@@ -197,14 +192,12 @@ class Terminal {
                 this.term.write(data);
             });
 
-            // Notificación de cierre del PTY (sustituye socket.onclose)
             this.Ipc.on("terminal_closed-"+this.port, (e, payload) => {
                 if (this.onclose) {
                     this.onclose(payload || {});
                 }
             });
 
-            // Scroll con rueda y touch como antes
             let parent = document.getElementById(opts.parentId);
             parent.addEventListener("wheel", e => {
                 this.term.scrollLines(Math.round(e.deltaY/10));
@@ -269,7 +262,6 @@ class Terminal {
                 this._sendSizeToServer();
             };
 
-            // Entrada del usuario al PTY vía IPC
             this.term.onData(data => {
                 this.Ipc.send("terminal_channel-"+this.port, "Input", data);
             });
@@ -416,7 +408,6 @@ class Terminal {
 
             this.tty.onExit((code, signal) => {
                 this._closed = true;
-                // Notificar cierre al renderer (sustituye evento close del socket)
                 try {
                     if (this.renderer) {
                         this.renderer.send("terminal_closed-"+this.port, { code, signal });
@@ -425,8 +416,6 @@ class Terminal {
                 this.onclosed(code, signal);
             });
 
-            // === Sustitución de WebSocket por IPC ===
-            // Canal único por puerto para control/entrada desde el renderer
             this.Ipc.on("terminal_channel-"+this.port, (e, ...args) => {
                 switch(args[0]) {
                     case "Renderer startup":
@@ -464,7 +453,6 @@ class Terminal {
                 }
             });
 
-            // Salida del PTY → enviar al renderer por un canal dedicado de datos
             this.tty.onData(data => {
                 this._nextTickUpdateTtyCWD = true;
                 this._nextTickUpdateProcess = true;
