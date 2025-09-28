@@ -1,10 +1,10 @@
+// terminal.class.js (parcheado para usar IPC de Electron en lugar de WebSocket)
 class Terminal {
     constructor(opts) {
         if (opts.role === "client") {
             if (!opts.parentId) throw "Missing options";
 
             this.xTerm = require("xterm").Terminal;
-            const {AttachAddon} = require("xterm-addon-attach");
             const {FitAddon} = require("xterm-addon-fit");
             const {LigaturesAddon} = require("xterm-addon-ligatures");
             const {WebglAddon} = require("xterm-addon-webgl");
@@ -17,12 +17,8 @@ class Terminal {
             this._sendSizeToServer = () => {
                 let cols = this.term.cols.toString();
                 let rows = this.term.rows.toString();
-                while (cols.length < 3) {
-                    cols = "0"+cols;
-                }
-                while (rows.length < 3) {
-                    rows = "0"+rows;
-                }
+                while (cols.length < 3) cols = "0"+cols;
+                while (rows.length < 3) rows = "0"+rows;
                 this.Ipc.send("terminal_channel-"+this.port, "Resize", cols, rows);
             };
 
@@ -37,10 +33,7 @@ class Terminal {
                     switch(func) {
                         case "negate":
                         case "grayscale":
-                            a[i] = {
-                                func,
-                                arg: []
-                            };
+                            a[i] = { func, arg: [] };
                             return true;
                         case "lighten":
                         case "darken":
@@ -60,10 +53,7 @@ class Terminal {
                     let arg = step.slice(step.indexOf("(")+1, step.indexOf(")"));
 
                     if (typeof Number(arg) === "number") {
-                        a[i] = {
-                            func,
-                            arg: [Number(arg)]
-                        };
+                        a[i] = { func, arg: [Number(arg)] };
                         window.isTermFilterValidated = true;
                         return true;
                     }
@@ -149,6 +139,7 @@ class Terminal {
             document.querySelectorAll('.xterm-helper-textarea').forEach(textarea => textarea.setAttribute('readonly', 'readonly'))
             this.term.focus();
 
+            // Notificar arranque al proceso principal, conservar el canal por puerto
             this.Ipc.send("terminal_channel-"+this.port, "Renderer startup");
             this.Ipc.on("terminal_channel-"+this.port, (e, ...args) => {
                 switch(args[0]) {
@@ -173,24 +164,11 @@ class Terminal {
                 this.oncwdchange(this.cwd || null);
             };
 
-            let sockHost = opts.host || "127.0.0.1";
-            let sockPort = this.port;
-
-            this.socket = new WebSocket("ws://"+sockHost+":"+sockPort);
-            this.socket.onopen = () => {
-                let attachAddon = new AttachAddon(this.socket);
-                this.term.loadAddon(attachAddon);
-                this.fit();
-            };
-            this.socket.onerror = e => {throw JSON.stringify(e)};
-            this.socket.onclose = e => {
-                if (this.onclose) {
-                    this.onclose(e);
-                }
-            };
-
+            // === Sustitución de WebSocket por IPC ===
+            // Recepción de datos del PTY desde main
             this.lastSoundFX = Date.now();
-            this.socket.addEventListener("message", e => {
+            this.lastRefit = 0;
+            this.Ipc.on("terminal_data-"+this.port, (e, data) => {
                 let d = Date.now();
 
                 if (d - this.lastSoundFX > 30) {
@@ -202,17 +180,31 @@ class Terminal {
                     this.fit();
                 }
 
-                // See #397
-                if (!window.settings.experimentalGlobeFeatures) return;
-                let ips = e.data.match(/((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)/g);
-                if (ips !== null && ips.length >= 1) {
-                    ips = ips.filter((val, index, self) => { return self.indexOf(val) === index; });
-                    ips.forEach(ip => {
-                        window.mods.globe.addTemporaryConnectedMarker(ip);
-                    });
+                // See #397 (mantener lógica de globe/IPs)
+                if (!window.settings.experimentalGlobeFeatures) {
+                    this.term.write(data);
+                    return;
+                }
+                try {
+                    let ips = data.match(/((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)/g);
+                    if (ips !== null && ips.length >= 1) {
+                        ips = ips.filter((val, index, self) => { return self.indexOf(val) === index; });
+                        ips.forEach(ip => {
+                            window.mods.globe.addTemporaryConnectedMarker(ip);
+                        });
+                    }
+                } catch(_e) {}
+                this.term.write(data);
+            });
+
+            // Notificación de cierre del PTY (sustituye socket.onclose)
+            this.Ipc.on("terminal_closed-"+this.port, (e, payload) => {
+                if (this.onclose) {
+                    this.onclose(payload || {});
                 }
             });
 
+            // Scroll con rueda y touch como antes
             let parent = document.getElementById(opts.parentId);
             parent.addEventListener("wheel", e => {
                 this.term.scrollLines(Math.round(e.deltaY/10));
@@ -277,12 +269,17 @@ class Terminal {
                 this._sendSizeToServer();
             };
 
+            // Entrada del usuario al PTY vía IPC
+            this.term.onData(data => {
+                this.Ipc.send("terminal_channel-"+this.port, "Input", data);
+            });
+
             this.write = cmd => {
-                this.socket.send(cmd);
+                this.Ipc.send("terminal_channel-"+this.port, "Input", cmd);
             };
 
             this.writelr = cmd => {
-                this.socket.send(cmd+"\r");
+                this.Ipc.send("terminal_channel-"+this.port, "Input", cmd+"\r");
             };
 
             this.clipboard = {
@@ -293,7 +290,7 @@ class Terminal {
                     this.clipboard.didCopy = true;
                 },
                 paste: () => {
-                    this.write(remote.clipboard.readText());
+                    this.write(require("electron").clipboard.readText());
                     this.clipboard.didCopy = false;
                 },
                 didCopy: false
@@ -302,7 +299,6 @@ class Terminal {
         } else if (opts.role === "server") {
 
             this.Pty = require("node-pty");
-            this.Websocket = require("ws").Server;
             this.Ipc = require("electron").ipcMain;
 
             this.renderer = null;
@@ -377,7 +373,9 @@ class Terminal {
                             console.log("Error while tracking TTY working directory: ", e);
                             this._disableCWDtracking = true;
                             try {
-                                this.renderer.send("terminal_channel-"+this.port, "Fallback cwd", opts.cwd || process.env.PWD);
+                                if (this.renderer) {
+                                    this.renderer.send("terminal_channel-"+this.port, "Fallback cwd", opts.cwd || process.env.PWD);
+                                }
                             } catch(e) {
                                 // renderer closed
                             }
@@ -397,7 +395,9 @@ class Terminal {
                         if (!this._closed) {
                             console.log("Error while retrieving TTY subprocess: ", e);
                             try {
-                                this.renderer.send("terminal_channel-"+this.port, "New process", "");
+                                if (this.renderer) {
+                                    this.renderer.send("terminal_channel-"+this.port, "New process", "");
+                                }
                             } catch(e) {
                                 // renderer closed
                             }
@@ -416,24 +416,22 @@ class Terminal {
 
             this.tty.onExit((code, signal) => {
                 this._closed = true;
+                // Notificar cierre al renderer (sustituye evento close del socket)
+                try {
+                    if (this.renderer) {
+                        this.renderer.send("terminal_closed-"+this.port, { code, signal });
+                    }
+                } catch(_e) {}
                 this.onclosed(code, signal);
             });
 
-            this.wss = new this.Websocket({
-                port: this.port,
-                clientTracking: true,
-                verifyClient: info => {
-                    if (this.wss.clients.length >= 1) {
-                        return false;
-                    } else {
-                        return true;
-                    }
-                }
-            });
+            // === Sustitución de WebSocket por IPC ===
+            // Canal único por puerto para control/entrada desde el renderer
             this.Ipc.on("terminal_channel-"+this.port, (e, ...args) => {
                 switch(args[0]) {
                     case "Renderer startup":
                         this.renderer = e.sender;
+                        this.onopened(this.tty._pid);
                         if (!this._disableCWDtracking && this.tty._cwd) {
                             this.renderer.send("terminal_channel-"+this.port, "New cwd", this.tty._cwd);
                         }
@@ -442,40 +440,45 @@ class Terminal {
                         }
                         break;
                     case "Resize":
-                        let cols = args[1];
-                        let rows = args[2];
-                        try {
-                            this.tty.resize(Number(cols), Number(rows));
-                        } catch (error) {
-                            //Keep going, it'll work anyways.
+                        {
+                            let cols = args[1];
+                            let rows = args[2];
+                            try {
+                                this.tty.resize(Number(cols), Number(rows));
+                            } catch (error) {
+                                //Keep going, it'll work anyways.
+                            }
+                            this.onresize(cols, rows);
                         }
-                        this.onresized(cols, rows);
+                        break;
+                    case "Input":
+                        {
+                            let data = args[1] || "";
+                            try {
+                                this.tty.write(data);
+                            } catch(_e) {}
+                        }
                         break;
                     default:
                         return;
                 }
             });
-            this.wss.on("connection", ws => {
-                this.onopened(this.tty._pid);
-                ws.on("close", (code, reason) => {
-                    this.ondisconnected(code, reason);
-                });
-                ws.on("message", msg => {
-                    this.tty.write(msg);
-                });
-                this.tty.onData(data => {
-                    this._nextTickUpdateTtyCWD = true;
-                    this._nextTickUpdateProcess = true;
-                    try {
-                        ws.send(data);
-                    } catch (e) {
-                        // Websocket closed
+
+            // Salida del PTY → enviar al renderer por un canal dedicado de datos
+            this.tty.onData(data => {
+                this._nextTickUpdateTtyCWD = true;
+                this._nextTickUpdateProcess = true;
+                try {
+                    if (this.renderer) {
+                        this.renderer.send("terminal_data-"+this.port, data);
                     }
-                });
+                } catch (e) {
+                    // renderer closed
+                }
             });
 
             this.close = () => {
-                this.tty.kill();
+                try { this.tty.kill(); } catch(_e) {}
                 this._closed = true;
             };
         } else {
@@ -487,3 +490,4 @@ class Terminal {
 module.exports = {
     Terminal
 };
+
