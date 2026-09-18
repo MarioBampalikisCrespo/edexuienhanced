@@ -17,6 +17,7 @@ section#boot_screen {
 }
 
 section#boot_screen.center {
+    flex-direction: column;
     align-items: center;
     justify-content: center;
 }
@@ -42,6 +43,50 @@ section#boot_screen h1 {
 section#boot_screen h1.glitch {
     border: none;
     color: transparent;
+}
+
+section#boot_screen h2 {
+    font-family: var(--font_main_light);
+    font-size: 2.4vh;
+    letter-spacing: 0.6vh;
+    text-align: center;
+    text-transform: uppercase;
+    color: rgb(var(--color_r), var(--color_g), var(--color_b));
+    margin-top: 1vh;
+}
+
+section#boot_screen h2 .cursor {
+    animation-name: blinkCursor;
+    animation-duration: 1s;
+    animation-timing-function: steps(1);
+    animation-iteration-count: infinite;
+}
+
+@keyframes blinkCursor {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
+}
+
+section#boot_screen p#boot_screen_credit {
+    position: absolute;
+    bottom: 3vh;
+    left: 0;
+    width: 100%;
+    margin: 0;
+    font-family: var(--font_main_light);
+    font-size: 1.6vh;
+    letter-spacing: 0.3vh;
+    text-align: center;
+    text-transform: uppercase;
+    color: rgba(var(--color_r), var(--color_g), var(--color_b), 0.7);
+
+    opacity: 0;
+    animation-name: fadeInTitle;
+    animation-duration: 500ms;
+    animation-delay: 700ms;
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+    animation-iteration-count: 1;
 }
 
 @keyframes fadeInTitle {

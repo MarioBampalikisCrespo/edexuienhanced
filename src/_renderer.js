@@ -272,6 +272,20 @@ function displayLine() {
     }
 }
 
+function typeText(el, text, charDelay) {
+    return new Promise(resolve => {
+        let i = 0;
+        let interval = setInterval(() => {
+            el.textContent += text[i];
+            i++;
+            if (i >= text.length) {
+                clearInterval(interval);
+                resolve();
+            }
+        }, charDelay);
+    });
+}
+
 // Show "logo" and background grid
 async function displayTitleScreen() {
     let bootScreen = document.getElementById("boot_screen");
@@ -288,8 +302,9 @@ async function displayTitleScreen() {
 
     document.body.setAttribute("class", "");
     bootScreen.setAttribute("class", "center");
-    bootScreen.innerHTML = "<h1>eDEX-UI</h1>";
+    bootScreen.innerHTML = `<h1>eDEX-UI</h1><h2><span id="boot_subtitle_text"></span><span class="cursor">_</span></h2><p id="boot_screen_credit">By Mario Bampalikis Crespo</p>`;
     let title = document.querySelector("section > h1");
+    let subtitleText = document.getElementById("boot_subtitle_text");
 
     await _delay(200);
 
@@ -304,6 +319,10 @@ async function displayTitleScreen() {
     title.setAttribute("style", `border: 5px solid rgb(${window.theme.r}, ${window.theme.g}, ${window.theme.b});`);
 
     await _delay(100);
+
+    await typeText(subtitleText, "Enhanced", 90);
+
+    await _delay(300);
 
     title.setAttribute("style", "");
     title.setAttribute("class", "glitch");
