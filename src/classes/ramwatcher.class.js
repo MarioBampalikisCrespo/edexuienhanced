@@ -39,11 +39,11 @@ class RAMwatcher {
         if (this.currentlyUpdating) return;
         this.currentlyUpdating = true;
         window.si.mem().then(data => {
-            if (data.free+data.used !== data.total) throw("RAM Watcher Error: Bad memory values");
-
             // Convert the data for the 440-points grid
-            let active = Math.round((440*data.active)/data.total);
-            let available = Math.round((440*(data.available-data.free))/data.total);
+            // Windows' free+used accounting doesn't always sum exactly to total
+            // (unlike Linux), so clamp instead of requiring an exact match.
+            let active = Math.min(440, Math.max(0, Math.round((440*data.active)/data.total)));
+            let available = Math.min(440-active, Math.max(0, Math.round((440*(data.available-data.free))/data.total)));
 
             // Update grid
             this.points.slice(0, active).forEach(domPoint => {
@@ -85,6 +85,3 @@ class RAMwatcher {
     }
 }
 
-module.exports = {
-    RAMwatcher
-};

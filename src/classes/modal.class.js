@@ -5,9 +5,9 @@ class Modal {
         if (!options || !options.type) throw "Missing parameters";
 
         this.type = options.type;
-        this.id = require("nanoid").nanoid();
+        this.id = window.api.uuid();
         while (typeof window.modals[this.id] !== "undefined") {
-            this.id = require("nanoid")();
+            this.id = window.api.uuid();
         }
         this.title = options.title || options.type || "Modal window";
         this.message = options.message || "Lorem ipsum dolor sit amet.";
@@ -181,6 +181,3 @@ class Modal {
     }
 }
 
-module.exports = {
-    Modal
-};

@@ -91,6 +91,3 @@ class DocReader {
     }
 }
 
-module.exports = {
-    DocReader
-};

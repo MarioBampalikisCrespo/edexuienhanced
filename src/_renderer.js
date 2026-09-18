@@ -1,5 +1,5 @@
 // Disable eval()
-window.eval = global.eval = function () {
+window.eval = function () {
     throw new Error("eval() is disabled for security reasons.");
 };
 // Security helper :)
@@ -34,13 +34,15 @@ window.onerror = (msg, path, line, col, error) => {
     document.getElementById("boot_screen").innerHTML += `${error} :  ${msg}<br/>==> at ${path}  ${line}:${col}`;
 };
 
-const path = require("path");
-const fs = require("fs");
-const electron = require("electron");
-const remote = require("@electron/remote");
-const ipc = electron.ipcRenderer;
+// `var`, not `const`/`let`: contextBridge exposes `window.api` as a
+// non-configurable property, which a top-level `const api` would collide
+// with at parse time (shared global scope across classic <script> tags).
+var api = window.api;
+const path = api.path;
+const fs = api.fs;
+const ipc = api.ipc;
 
-const settingsDir = remote.app.getPath("userData");
+const settingsDir = api.remoteApp.getPath("userData");
 const themesDir = path.join(settingsDir, "themes");
 const keyboardsDir = path.join(settingsDir, "keyboards");
 const fontsDir = path.join(settingsDir, "fonts");
@@ -49,35 +51,35 @@ const shortcutsFile = path.join(settingsDir, "shortcuts.json");
 const lastWindowStateFile = path.join(settingsDir, "lastWindowState.json");
 
 // Load config
-window.settings = require(settingsFile);
-window.shortcuts = require(shortcutsFile);
-window.lastWindowState = require(lastWindowStateFile);
+window.settings = fs.readJSONSync(settingsFile);
+window.shortcuts = fs.readJSONSync(shortcutsFile);
+window.lastWindowState = fs.readJSONSync(lastWindowStateFile);
 
 // Load CLI parameters
-if (remote.process.argv.includes("--nointro")) {
+if (api.process.argv.includes("--nointro")) {
     window.settings.nointroOverride = true;
 } else {
     window.settings.nointroOverride = false;
 }
-if (electron.remote.process.argv.includes("--nocursor")) {
+if (api.process.argv.includes("--nocursor")) {
     window.settings.nocursorOverride = true;
 } else {
     window.settings.nocursorOverride = false;
 }
 
 // Retrieve theme override (hotswitch)
-ipc.once("getThemeOverride", (e, theme) => {
+ipc.once("getThemeOverride", theme => {
     if (theme !== null) {
         window.settings.theme = theme;
         window.settings.nointroOverride = true;
-        _loadTheme(require(path.join(themesDir, window.settings.theme+".json")));
+        _loadTheme(fs.readJSONSync(path.join(themesDir, window.settings.theme+".json")));
     } else {
-        _loadTheme(require(path.join(themesDir, window.settings.theme+".json")));
+        _loadTheme(fs.readJSONSync(path.join(themesDir, window.settings.theme+".json")));
     }
 });
 ipc.send("getThemeOverride");
 // Same for keyboard override/hotswitch
-ipc.once("getKbOverride", (e, layout) => {
+ipc.once("getKbOverride", layout => {
     if (layout !== null) {
         window.settings.keyboard = layout;
         window.settings.nointroOverride = true;
@@ -176,8 +178,6 @@ function waitForFonts() {
 
 // A proxy function used to add multithreading to systeminformation calls - see backend process manager @ _multithread.js
 function initSystemInformationProxy() {
-    const { nanoid } = require("nanoid/non-secure");
-
     window.si = new Proxy({}, {
         apply: () => {throw new Error("Cannot use sysinfo proxy directly as a function")},
         set: () => {throw new Error("Cannot set a property on the sysinfo proxy")},
@@ -186,8 +186,8 @@ function initSystemInformationProxy() {
                 let callback = (typeof args[args.length - 1] === "function") ? true : false;
 
                 return new Promise((resolve, reject) => {
-                    let id = nanoid();
-                    ipc.once("systeminformation-reply-"+id, (e, res) => {
+                    let id = api.uuid();
+                    ipc.once("systeminformation-reply-"+id, res => {
                         if (callback) {
                             args[args.length - 1](res);
                         }
@@ -204,7 +204,7 @@ function initSystemInformationProxy() {
 window.audioManager = new AudioManager();
 
 // See #223
-electron.remote.app.focus();
+api.remoteApp.focus();
 
 let i = 0;
 if (window.settings.nointro || window.settings.nointroOverride) {
@@ -220,10 +220,10 @@ if (window.settings.nointro || window.settings.nointroOverride) {
 // Startup boot log
 function displayLine() {
     let bootScreen = document.getElementById("boot_screen");
-    let log = fs.readFileSync(path.join(__dirname, "assets", "misc", "boot_log.txt")).toString().split('\n');
+    let log = fs.readFileSync(path.join(api.paths.root, "assets", "misc", "boot_log.txt")).toString().split('\n');
 
     function isArchUser() {
-        return require("os").platform() === "linux"
+        return api.os.platform() === "linux"
                 && fs.existsSync("/etc/os-release")
                 && fs.readFileSync("/etc/os-release").toString().includes("arch");
     }
@@ -243,7 +243,7 @@ function displayLine() {
 
     switch(true) {
         case i === 2:
-            bootScreen.innerHTML += `eDEX-UI Kernel version ${electron.remote.app.getVersion()} boot at ${Date().toString()}; root:xnu-1699.22.73~1/RELEASE_X86_64`;
+            bootScreen.innerHTML += `eDEX-UI Kernel version ${api.remoteApp.getVersion()} boot at ${Date().toString()}; root:xnu-1699.22.73~1/RELEASE_X86_64`;
         case i === 4:
             setTimeout(displayLine, 500);
             break;
@@ -334,7 +334,7 @@ async function getDisplayName() {
         return user;
 
     try {
-        user = await require("username")();
+        user = await api.username();
     } catch (e) {}
 
     return user;
@@ -487,7 +487,7 @@ async function initUI() {
     window.onmouseup = e => {
         if (window.keyboard.linkedToTerm) window.term[window.currentTerm].term.focus();
     };
-    window.term[0].term.writeln("\033[1m"+`Welcome to eDEX-UI v${electron.remote.app.getVersion()} - Electron v${process.versions.electron}`+"\033[0m");
+    window.term[0].term.writeln("\033[1m"+`Welcome to eDEX-UI v${api.remoteApp.getVersion()} - Electron v${api.process.versions.electron}`+"\033[0m");
 
     await _delay(100);
 
@@ -551,7 +551,7 @@ window.focusShellTab = number => {
 
         document.getElementById("shell_tab"+number).innerHTML = "<p>LOADING...</p>";
         ipc.send("ttyspawn", "true");
-        ipc.once("ttyspawn-reply", (e, r) => {
+        ipc.once("ttyspawn-reply", r => {
             if (r.startsWith("ERROR")) {
                 document.getElementById("shell_tab"+number).innerHTML = "<p>ERROR</p>";
             } else if (r.startsWith("SUCCESS")) {
@@ -603,7 +603,7 @@ window.openSettings = async () => {
         if (th === window.settings.theme) return;
         themes += `<option>${th}</option>`;
     });
-    for (let i = 0; i < electron.remote.screen.getAllDisplays().length; i++) {
+    for (let i = 0; i < api.screen.getAllDisplays().length; i++) {
         if (i !== window.settings.monitor) monitors += `<option>${i}</option>`;
     }
     let nets = await window.si.networkInterfaces();
@@ -616,7 +616,7 @@ window.openSettings = async () => {
 
     new Modal({
         type: "custom",
-        title: `Settings <i>(v${electron.remote.app.getVersion()})</i>`,
+        title: `Settings <i>(v${api.remoteApp.getVersion()})</i>`,
         html: `<table id="settingsEditor">
                     <tr>
                         <th>Key</th>
@@ -799,10 +799,10 @@ window.openSettings = async () => {
                 <h6 id="settingsEditorStatus">Loaded values from memory</h6>
                 <br>`,
         buttons: [
-            {label: "Open in External Editor", action:`electron.shell.openPath('${settingsFile}');electronWin.minimize();`},
+            {label: "Open in External Editor", action:`window.api.shell.openPath('${settingsFile}');window.api.currentWindow.minimize();`},
             {label: "Save to Disk", action: "window.writeSettingsFile()"},
             {label: "Reload UI", action: "window.location.reload(true);"},
-            {label: "Restart eDEX", action: "electron.remote.app.relaunch();electron.remote.app.quit();"}
+            {label: "Restart eDEX", action: "window.api.remoteApp.relaunch();window.api.remoteApp.quit();"}
         ]
     }, () => {
         // Link the keyboard back to the terminal
@@ -813,8 +813,8 @@ window.openSettings = async () => {
     });
 };
 
-window.writeFile = (path) => {
-    fs.writeFile(path, document.getElementById("fileEdit").value, "utf-8", () => {
+window.writeFile = (filePath) => {
+    fs.writeFile(filePath, document.getElementById("fileEdit").value, "utf-8").then(() => {
         document.getElementById("fedit-status").innerHTML = "<i>File saved.</i>";
     });
 };
@@ -860,8 +860,8 @@ window.writeSettingsFile = () => {
 };
 
 window.toggleFullScreen = () => {
-    let useFullscreen = (electronWin.isFullScreen() ? false : true);
-    electronWin.setFullScreen(useFullscreen);
+    let useFullscreen = (api.currentWindow.isFullScreen() ? false : true);
+    api.currentWindow.setFullScreen(useFullscreen);
 
     //Update settings
     window.lastWindowState["useFullscreen"] = useFullscreen;
@@ -916,7 +916,7 @@ window.openShortcutsHelp = () => {
     window.keyboard.detach();
     new Modal({
         type: "custom",
-        title: `Available Keyboard Shortcuts <i>(v${electron.remote.app.getVersion()})</i>`,
+        title: `Available Keyboard Shortcuts <i>(v${api.remoteApp.getVersion()})</i>`,
         html: `<h5>Using either the on-screen or a physical keyboard, you can use the following shortcuts:</h5>
                 <details open id="shortcutsHelpAccordeon1">
                     <summary>Emulator shortcuts</summary>
@@ -943,7 +943,7 @@ window.openShortcutsHelp = () => {
                 </details>
                 <br>`,
         buttons: [
-            {label: "Open Shortcuts File", action:`electron.shell.openPath('${shortcutsFile}');electronWin.minimize();`},
+            {label: "Open Shortcuts File", action:`window.api.shell.openPath('${shortcutsFile}');window.api.currentWindow.minimize();`},
             {label: "Reload UI", action: "window.location.reload(true);"},
         ]
     }, () => {
@@ -1032,7 +1032,7 @@ window.useAppShortcut = action => {
             window.keyboard.togglePasswordMode();
             return true;
         case "DEV_DEBUG":
-            electron.remote.getCurrentWindow().webContents.toggleDevTools();
+            api.currentWindow.toggleDevTools();
             return true;
         case "DEV_RELOAD":
             window.location.reload(true);
@@ -1044,7 +1044,7 @@ window.useAppShortcut = action => {
 };
 
 // Global keyboard shortcuts
-const globalShortcut = electron.remote.globalShortcut;
+const globalShortcut = api.globalShortcut;
 globalShortcut.unregisterAll();
 
 window.registerKeyboardShortcuts = () => {
@@ -1105,13 +1105,13 @@ document.addEventListener("keydown", e => {
 
 // Fix #265
 window.addEventListener("keyup", e => {
-    if (require("os").platform() === "win32" && e.key === "F4" && e.altKey === true) {
-        electron.remote.app.quit();
+    if (api.os.platform() === "win32" && e.key === "F4" && e.altKey === true) {
+        api.remoteApp.quit();
     }
 });
 
 // Fix double-tap zoom on touchscreens
-electron.webFrame.setVisualZoomLevelLimits(1, 1);
+api.webFrame.setZoomLimits();
 
 // Resize terminal with window
 window.onresize = () => {
@@ -1124,12 +1124,11 @@ window.onresize = () => {
 
 // See #413
 window.resizeTimeout = null;
-let electronWin = electron.remote.getCurrentWindow();
-electronWin.on("resize", () => {
+api.currentWindow.onResize(() => {
     if (settings.keepGeometry === false) return;
     clearTimeout(window.resizeTimeout);
     window.resizeTimeout = setTimeout(() => {
-        let win = electron.remote.getCurrentWindow();
+        let win = api.currentWindow;
         if (win.isFullScreen()) return false;
         if (win.isMaximized()) {
             win.unmaximize();
@@ -1147,6 +1146,6 @@ electronWin.on("resize", () => {
     }, 100);
 });
 
-electronWin.on("leave-full-screen", () => {
-    electron.remote.getCurrentWindow().setSize(960, 540);
+api.currentWindow.onLeaveFullScreen(() => {
+    api.currentWindow.setSize(960, 540);
 });

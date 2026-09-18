@@ -46,6 +46,3 @@ class HardwareInspector {
     }
 }
 
-module.exports = {
-    HardwareInspector
-};

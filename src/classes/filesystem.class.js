@@ -2,14 +2,12 @@ class FilesystemDisplay {
     constructor(opts) {
         if (!opts.parentId) throw "Missing options";
 
-        const fs = require("fs");
-        const path = require("path");
         this.cwd = [];
         this.cwd_path = null;
         this.iconcolor = `rgb(${window.theme.r}, ${window.theme.g}, ${window.theme.b})`;
         this._formatBytes = (a,b) => {if(0==a)return"0 Bytes";var c=1024,d=b||2,e=["Bytes","KB","MB","GB","TB","PB","EB","ZB","YB"],f=Math.floor(Math.log(a)/Math.log(c));return parseFloat((a/Math.pow(c,f)).toFixed(d))+" "+e[f]};
-        this.fileIconsMatcher = require("./assets/misc/file-icons-match.js");
-        this.icons = require("./assets/icons/file-icons.json");
+        this.fileIconsMatcher = window.api.matchFileIcon;
+        this.icons = window.api.fs.readJSONSync(window.api.path.join(window.api.paths.root, "assets/icons/file-icons.json"));
         this.edexIcons = {
             theme: {
                 width: 24,
@@ -66,25 +64,6 @@ class FilesystemDisplay {
             }
         }, 1000);
 
-        this._asyncFSwrapper = new Proxy(fs, {
-            get: function(fs, prop) {
-                if (prop in fs) {
-                    return function(...args) {
-                        return new Promise((resolve, reject) => {
-                            fs[prop](...args, (err, d) => {
-                                if (typeof err !== "undefined" && err !== null) reject(err);
-                                if (typeof d !== "undefined") resolve(d);
-                                if (typeof d === "undefined" && typeof err === "undefined") resolve();
-                            });
-                        });
-                    }
-                }
-            },
-            set: function() {
-                return false;
-            }
-        });
-
         this.setFailedState = () => {
             this.failed = true;
             container.innerHTML = `
@@ -123,7 +102,7 @@ class FilesystemDisplay {
             if (this._fsWatcher) {
                 this._fsWatcher.close();
             }
-            this._fsWatcher = fs.watch(dir, (eventType, filename) => {
+            this._fsWatcher = window.api.fs.watch(dir, (eventType, filename) => {
                 if (eventType != "change") { // #758 - Don't refresh file view if only file contents have changed.
                     this._runNextTick = true;
                 }
@@ -161,9 +140,9 @@ class FilesystemDisplay {
                 document.querySelector("section#filesystem > h3.title > p:first-of-type").innerText = "FILESYSTEM - TRACKING FAILED, RUNNING DETACHED FROM TTY";
             }
 
-            if (process.platform === "win32" && dir.endsWith(":")) dir = dir+"\\";
+            if (window.api.process.platform === "win32" && dir.endsWith(":")) dir = dir+"\\";
             let tcwd = dir;
-            let content = await this._asyncFSwrapper.readdir(tcwd).catch(err => {
+            let content = await window.api.fs.readdir(tcwd).catch(err => {
                 console.warn(err);
                 if (this._noTracking === true && this.dirpath) { // #262
                     this.setFailedState();
@@ -183,7 +162,7 @@ class FilesystemDisplay {
                 if (content.length === 0) resolve();
 
                 content.forEach(async (file, i) => {
-                    let fstat = await this._asyncFSwrapper.lstat(path.join(tcwd, file)).catch(e => {
+                    let fstat = await window.api.fs.lstat(window.api.path.join(tcwd, file)).catch(e => {
                         if (!e.message.includes("EPERM") && !e.message.includes("EBUSY")) {
                             reject();
                         }
@@ -191,28 +170,28 @@ class FilesystemDisplay {
 
                     let e = {
                         name: window._escapeHtml(file),
-                        path: path.resolve(tcwd, file),
+                        path: window.api.path.resolve(tcwd, file),
                         type: "other",
                         category: "other",
                         hidden: false
                     };
 
                     if (typeof fstat !== "undefined") {
-                        e.lastAccessed = fstat.mtime.getTime();
+                        e.lastAccessed = fstat.mtimeMs;
 
-                        if (fstat.isDirectory()) {
+                        if (fstat.isDirectory) {
                             e.category = "dir";
                             e.type = "dir";
                         }
                         if (e.category === "dir" && tcwd === settingsDir && file === "themes") e.type="edex-themesDir";
                         if (e.category === "dir" && tcwd === settingsDir && file === "keyboards") e.type = "edex-kblayoutsDir";
 
-                        if (fstat.isSymbolicLink()) {
+                        if (fstat.isSymbolicLink) {
                             e.category = "symlink";
                             e.type = "symlink";
                         }
 
-                        if (fstat.isFile()) {
+                        if (fstat.isFile) {
                             e.category = "file";
                             e.type = "file";
                             e.size = fstat.size;
@@ -270,7 +249,7 @@ class FilesystemDisplay {
             let blocks = await window.si.blockDevices();
             let devices = [];
             blocks.forEach(block => {
-                if (fs.existsSync(block.mount)) {
+                if (window.api.fs.existsSync(block.mount)) {
                     let type = (block.type === "rom") ? "rom" : "disk";
                     if (block.removable && block.type !== "rom") {
                         type = "usb";
@@ -309,8 +288,8 @@ class FilesystemDisplay {
                 let hidden = e.hidden ? " hidden" : "";
 
                 let cmdPrefix = `if (window.keyboard.container.dataset.isCtrlOn == "true") {
-                                electron.shell.openPath(fsDisp.cwd[${blockIndex}].path);
-                                electronWin.minimize();
+                                window.api.shell.openPath(fsDisp.cwd[${blockIndex}].path);
+                                window.api.currentWindow.minimize();
                             } else if (window.keyboard.container.dataset.isShiftOn == "true") {
                                 window.term[window.currentTerm].write("\\""+fsDisp.cwd[${blockIndex}].path+"\\"");
                             } else {
@@ -326,7 +305,7 @@ class FilesystemDisplay {
                     } else if (e.type === "up") {
                         cmd = `window.term[window.currentTerm].writelr("cd ..")`;
                     } else if (e.type === "disk" || e.type === "rom" || e.type === "usb") {
-                        if (process.platform === "win32") {
+                        if (window.api.process.platform === "win32") {
                             cmd = `window.term[window.currentTerm].writelr("${e.path.replace(/\\/g, '')}")`;
                         } else {
                             cmd = `window.term[window.currentTerm].writelr("cd \\"${e.path.replace(/\\/g, '')}\\"")`;
@@ -338,7 +317,7 @@ class FilesystemDisplay {
                     if (e.type === "dir" || e.type.endsWith("Dir")) {
                         cmd = `window.fsDisp.readFS(fsDisp.cwd[${blockIndex}].path)`;
                     } else if (e.type === "up") {
-                        cmd = `window.fsDisp.readFS(path.resolve(window.fsDisp.dirpath, ".."))`;
+                        cmd = `window.fsDisp.readFS(window.api.path.resolve(window.fsDisp.dirpath, ".."))`;
                     } else if (e.type === "disk" || e.type === "rom" || e.type === "usb") {
                         cmd = `window.fsDisp.readFS("${e.path.replace(/\\/g, '')}")`;
                     } else {
@@ -520,7 +499,7 @@ class FilesystemDisplay {
         this.renderDiskUsage = async fsBlock => {
             if (document.getElementById("fs_space_bar").getAttribute("onclick") !== "" || fsBlock === null) return;
 
-            let splitter = (process.platform === "win32") ? "\\" : "/";
+            let splitter = (window.api.process.platform === "win32") ? "\\" : "/";
             let displayMount = (fsBlock.mount.length < 18) ? fsBlock.mount : "..."+splitter+fsBlock.mount.split(splitter).pop();
 
             // See #226
@@ -543,7 +522,12 @@ class FilesystemDisplay {
         // ...except if we're hot-reloading, in which case this can mess up the rendering
         // See #392
         if (window.performance.navigation.type === 0) {
-            this.readFS(window.term[window.currentTerm].cwd || window.settings.cwd);
+            let initialCwd = window.term[window.currentTerm].cwd || window.settings.cwd;
+            if (initialCwd.startsWith("FALLBACK |-- ")) {
+                initialCwd = initialCwd.slice(13);
+                this._noTracking = true;
+            }
+            this.readFS(initialCwd);
         }
 
         this.openFile = (name, path, type) => { //Might add text formatting at some point, not now though - Surge
@@ -554,7 +538,7 @@ class FilesystemDisplay {
                 name = block.name;
             }
 
-            let mime = require("mime-types");
+            let mime = window.api.mime;
 
             block.path = block.path.replace(/\\/g, "/");
 
@@ -605,15 +589,7 @@ class FilesystemDisplay {
                     break;
                 default:
                     if (mime.charset(filetype) === "UTF-8") {
-                        fs.readFile(block.path, 'utf-8', (err, data) => {
-                            if (err) {
-                                new Modal({
-                                    type: "info",
-                                    title: "Failed to load file: " + block.path,
-                                    html: err
-                                });
-                                console.log(err);
-                            };
+                        const openEditor = data => {
                             window.keyboard.detach();
                             new Modal(
                                 {
@@ -628,6 +604,15 @@ class FilesystemDisplay {
                                     window.term[window.currentTerm].term.focus();
                                 }
                             );
+                        };
+                        window.api.fs.readFile(block.path, 'utf-8').then(openEditor).catch(err => {
+                            new Modal({
+                                type: "info",
+                                title: "Failed to load file: " + block.path,
+                                html: err
+                            });
+                            console.log(err);
+                            openEditor(undefined);
                         });
                    break;
                 }
@@ -737,6 +722,3 @@ class FilesystemDisplay {
     }
 }
 
-module.exports = {
-    FilesystemDisplay
-};

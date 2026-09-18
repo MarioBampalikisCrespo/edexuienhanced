@@ -4,11 +4,10 @@ class Terminal {
         if (opts.role === "client") {
             if (!opts.parentId) throw "Missing options";
 
-            this.xTerm = require("xterm").Terminal;
-            const {FitAddon} = require("xterm-addon-fit");
-            const {LigaturesAddon} = require("xterm-addon-ligatures");
-            const {WebglAddon} = require("xterm-addon-webgl");
-            this.Ipc = require("electron").ipcRenderer;
+            this.xTerm = window.Terminal;
+            const FitAddon = window.FitAddon.FitAddon;
+            const WebglAddon = window.WebglAddon.WebglAddon;
+            this.Ipc = window.api.ipc;
 
             this.port = opts.port || 3000;
             this.cwd = "";
@@ -62,28 +61,7 @@ class Terminal {
                 });
             }
 
-            let color = require("color");
-            let colorify;
-            if (doCustomFilter) {
-                colorify = (base, target) => {
-                    let newColor = color(base);
-                    target = color(target);
-
-                    for (let i = 0; i < window.theme.terminal.colorFilter.length; i++) {
-                        if (window.theme.terminal.colorFilter[i].func === "mix") {
-                            newColor = newColor[window.theme.terminal.colorFilter[i].func](target, ...window.theme.terminal.colorFilter[i].arg);
-                        } else {
-                            newColor = newColor[window.theme.terminal.colorFilter[i].func](...window.theme.terminal.colorFilter[i].arg);
-                        }
-                    }
-
-                    return newColor.hex();
-                };
-            } else {
-                colorify = (base, target) => {
-                    return color(base).grayscale().mix(color(target), 0.3).hex();
-                };
-            }
+            let colorify = (base, target) => window.api.colorify(base, target, doCustomFilter ? window.theme.terminal.colorFilter : null);
 
             let themeColor = `rgb(${window.theme.r}, ${window.theme.g}, ${window.theme.b})`;
 
@@ -129,8 +107,6 @@ class Terminal {
             this.term.loadAddon(fitAddon);
             this.term.open(document.getElementById(opts.parentId));
             this.term.loadAddon(new WebglAddon());
-            let ligaturesAddon = new LigaturesAddon();
-            this.term.loadAddon(ligaturesAddon);
             this.term.attachCustomKeyEventHandler(e => {
                 window.keyboard.keydownHandler(e);
                 return true;
@@ -139,7 +115,7 @@ class Terminal {
             document.querySelectorAll('.xterm-helper-textarea').forEach(textarea => textarea.setAttribute('readonly', 'readonly'))
             this.term.focus();
             this.Ipc.send("terminal_channel-"+this.port, "Renderer startup");
-            this.Ipc.on("terminal_channel-"+this.port, (e, ...args) => {
+            this.Ipc.on("terminal_channel-"+this.port, (...args) => {
                 switch(args[0]) {
                     case "New cwd":
                         this.cwd = args[1];
@@ -164,7 +140,7 @@ class Terminal {
 
             this.lastSoundFX = Date.now();
             this.lastRefit = 0;
-            this.Ipc.on("terminal_data-"+this.port, (e, data) => {
+            this.Ipc.on("terminal_data-"+this.port, data => {
                 let d = Date.now();
 
                 if (d - this.lastSoundFX > 30) {
@@ -192,7 +168,7 @@ class Terminal {
                 this.term.write(data);
             });
 
-            this.Ipc.on("terminal_closed-"+this.port, (e, payload) => {
+            this.Ipc.on("terminal_closed-"+this.port, payload => {
                 if (this.onclose) {
                     this.onclose(payload || {});
                 }
@@ -282,7 +258,7 @@ class Terminal {
                     this.clipboard.didCopy = true;
                 },
                 paste: () => {
-                    this.write(require("electron").clipboard.readText());
+                    this.write(window.api.clipboard.readText());
                     this.clipboard.didCopy = false;
                 },
                 didCopy: false
@@ -475,7 +451,9 @@ class Terminal {
     }
 }
 
-module.exports = {
-    Terminal
-};
+// Required by _boot.js (main process, role: "server"); the renderer ("client"
+// role) consumes this class as a shared top-level script-scope global instead.
+if (typeof module !== "undefined") {
+    module.exports = { Terminal };
+}
 

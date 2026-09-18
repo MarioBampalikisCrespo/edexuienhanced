@@ -2,7 +2,7 @@
 <html>
     <head>
         <meta charset="utf-8" />
-        <meta http-equiv="Content-Security-Policy" content="default-src file: 'unsafe-inline'; img-src file: data:; media-src file:; connect-src ws: file:">
+        <meta http-equiv="Content-Security-Policy" content="default-src file: 'unsafe-inline'; img-src file: data:; media-src file:; connect-src file:">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>eDEX-UI</title>
 
@@ -35,6 +35,14 @@
 
         <!-- Load dependency js -->
         <script src="node_modules/pdfjs-dist/build/pdf.js"></script>
+        <!-- These used to be require()'d from inside the renderer classes; loaded as
+             plain globals now that nodeIntegration is off (see preload.js for the rest). -->
+        <script src="node_modules/xterm/lib/xterm.js"></script>
+        <script src="node_modules/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
+        <script src="node_modules/xterm-addon-webgl/lib/xterm-addon-webgl.js"></script>
+        <script src="node_modules/howler/dist/howler.js"></script>
+        <script src="node_modules/smoothie/smoothie.js"></script>
+        <script src="assets/vendor/encom-globe.js"></script>
         <!-- Load main modules classes -->
         <script src="classes/modal.class.js"></script>
         <script src="classes/terminal.class.js"></script>

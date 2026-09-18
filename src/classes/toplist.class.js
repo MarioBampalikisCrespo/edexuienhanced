@@ -241,6 +241,3 @@ class Toplist {
     }
 }
 
-module.exports = {
-    Toplist
-};

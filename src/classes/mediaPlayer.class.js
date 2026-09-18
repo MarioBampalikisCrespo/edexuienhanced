@@ -2,7 +2,7 @@ class MediaPlayer {
     constructor(opts) {
         const modalElementId = "modal_" + opts.modalId;
         const type = opts.type;
-        const icons = require("./assets/icons/file-icons.json");
+        const icons = window.api.fs.readJSONSync(window.api.path.join(window.api.paths.root, "assets/icons/file-icons.json"));
         const iconcolor = `rgb(${window.theme.r}, ${window.theme.g}, ${window.theme.b})`;
         const mediaContainer = document.getElementById(modalElementId).querySelector(".media_container");
         const media = document.getElementById(modalElementId).querySelector(type);
@@ -177,6 +177,3 @@ class MediaPlayer {
     }
 }
 
-module.exports = {
-    MediaPlayer
-};

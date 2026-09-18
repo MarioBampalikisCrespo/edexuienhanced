@@ -130,6 +130,3 @@ class FuzzyFinder {
      }
 }
 
-module.exports = {
-    FuzzyFinder
-};

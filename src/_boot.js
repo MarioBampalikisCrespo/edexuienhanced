@@ -30,7 +30,8 @@ if (!gotLock) {
 signale.time("Startup");
 
 const electron = require("electron");
-require('@electron/remote/main').initialize()
+const remoteMain = require('@electron/remote/main');
+remoteMain.initialize()
 const ipc = electron.ipcMain;
 const path = require("path");
 const url = require("url");
@@ -192,16 +193,28 @@ function createWindow(settings) {
         backgroundColor: '#000000',
         webPreferences: {
             devTools: true,
-	    enableRemoteModule: true,
-            contextIsolation: false,
+            preload: path.join(__dirname, "preload.js"),
+            // @electron/remote is only ever require()'d from preload.js (never
+            // reaches the page), so this stays on even with nodeIntegration off.
+            enableRemoteModule: true,
+            contextIsolation: true,
             backgroundThrottling: false,
             webSecurity: true,
-            nodeIntegration: true,
+            nodeIntegration: false,
             nodeIntegrationInSubFrames: false,
             allowRunningInsecureContent: false,
             experimentalFeatures: settings.experimentalFeatures || false
         }
     });
+
+    // @electron/remote gates renderer/preload access per-WebContents in some
+    // versions of the module; enabling it here is a no-op if this version
+    // doesn't require it.
+    try {
+        remoteMain.enable(win.webContents);
+    } catch (e) {
+        signale.info("remoteMain.enable() not applicable for this @electron/remote version, skipping.");
+    }
 
     win.loadURL(url.format({
         pathname: path.join(__dirname, 'ui.html'),
@@ -307,7 +320,6 @@ app.on('ready', async () => {
             signale.success(`New terminal back-end initialized at ${port}`);
             term.onclosed = (code, signal) => {
                 term.ondisconnected = () => {};
-                term.wss.close();
                 signale.complete(`TTY exited at ${port}`, code, signal);
                 extraTtys[term.port] = null;
                 term = null;
@@ -319,7 +331,6 @@ app.on('ready', async () => {
             term.ondisconnected = () => {
                 term.onclosed = () => {};
                 term.close();
-                term.wss.close();
                 extraTtys[term.port] = null;
                 term = null;
             };
